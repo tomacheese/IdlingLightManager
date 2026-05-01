@@ -45,10 +45,15 @@ internal static partial class Program
                    .WriteTo.Sink(listViewSink))
             .ConfigureServices((ctx, services) =>
             {
-                services.Configure<IdleDetectionOptions>(
-                    ctx.Configuration.GetSection("IdleDetection"));
-                services.Configure<LightControlOptions>(
-                    ctx.Configuration.GetSection("LightControl"));
+                services.AddOptions<IdleDetectionOptions>()
+                    .Bind(ctx.Configuration.GetSection("IdleDetection"))
+                    .ValidateOnStart();
+                services.AddOptions<LightControlOptions>()
+                    .Bind(ctx.Configuration.GetSection("LightControl"))
+                    .Validate(
+                        o => !string.IsNullOrEmpty(o.DeviceId) && !string.IsNullOrEmpty(o.ApiToken),
+                        "LightControl の設定が不完全です: DeviceId と ApiToken の設定が必要です。")
+                    .ValidateOnStart();
 
                 // IHttpClientFactory 経由で HttpClient を注入し、ソケット再利用と DNS 更新に対応する
                 services.AddHttpClient<LightControlService>((sp, client) =>
