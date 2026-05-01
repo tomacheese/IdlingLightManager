@@ -76,9 +76,7 @@ jobs:
       - name: Create zip
         shell: pwsh
         run: |
-          $publishDir = Get-ChildItem -Path . -Filter publish -Recurse -Directory |
-            Select-Object -First 1 -ExpandProperty FullName
-          Compress-Archive -Path "$publishDir\*" -DestinationPath IdlingLightManager.zip -Force
+          Compress-Archive -Path "publish\*" -DestinationPath IdlingLightManager.zip -Force
 
       - name: Publish Release
         uses: softprops/action-gh-release@v2
