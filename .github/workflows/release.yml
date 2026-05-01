@@ -76,7 +76,8 @@ jobs:
       - name: Create zip
         shell: pwsh
         run: |
-          Compress-Archive -Path "publish\*" -DestinationPath IdlingLightManager.zip -Force
+          $items = Get-ChildItem -Path "publish" -Exclude "*.xml", "*.pdb" | Select-Object -ExpandProperty FullName
+          Compress-Archive -Path $items -DestinationPath IdlingLightManager.zip -Force
 
       - name: Publish Release
         uses: softprops/action-gh-release@v2
