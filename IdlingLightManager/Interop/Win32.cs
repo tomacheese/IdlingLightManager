@@ -14,7 +14,7 @@ internal static class Win32
     [StructLayout(LayoutKind.Sequential)]
     internal struct LASTINPUTINFO
     {
-#pragma warning disable SA1307 // Win32 API 由来のフィールド名のため変更不可
+#pragma warning disable SA1307, IDE1006 // Win32 API 由来のフィールド名のため変更不可
         /// <summary>構造体のバイトサイズ。呼び出し前に Marshal.SizeOf で設定する必要がある。</summary>
         [MarshalAs(UnmanagedType.U4)]
         public uint cbSize;
@@ -22,7 +22,7 @@ internal static class Win32
         /// <summary>最終入力時の TickCount（ミリ秒）。</summary>
         [MarshalAs(UnmanagedType.U4)]
         public uint dwTime;
-#pragma warning restore SA1307
+#pragma warning restore SA1307, IDE1006
     }
 
     /// <summary>
