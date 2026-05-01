@@ -31,8 +31,15 @@ internal sealed class TrayApplicationContext : ApplicationContext
         // ホストの停止要求を受けてフォームを閉じる
         _lifetime.ApplicationStopping.Register(() =>
         {
-            if (!_form.IsDisposed)
-                _form.Invoke(() => _form.Close());
+            try
+            {
+                if (!_form.IsDisposed && _form.IsHandleCreated)
+                    _form.BeginInvoke(() => _form.Close());
+            }
+            catch (InvalidOperationException)
+            {
+                // ハンドル未作成/破棄済みへのアクセス競合時は無視する
+            }
         });
 
         // 非表示で起動する（NotifyIcon などの初期化を発火させるため Show→Hide の順で呼ぶ）
