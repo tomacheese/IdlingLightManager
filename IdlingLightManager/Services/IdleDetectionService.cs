@@ -24,8 +24,11 @@ internal sealed partial class IdleDetectionService(
     /// <summary>ロガー。</summary>
     private readonly ILogger<IdleDetectionService> _logger = logger;
 
+    /// <summary>状態遷移の直列化用セマフォ。並列ループによる API 重複送信を防ぐ。</summary>
+    private readonly SemaphoreSlim _stateLock = new(1, 1);
+
     /// <summary>照明の現在の状態。true = ON、false = OFF。</summary>
-    private volatile bool _running = true;
+    private volatile bool _isLightOn = true;
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -49,6 +52,26 @@ internal sealed partial class IdleDetectionService(
             RunResendAsync(resendTimer, stoppingToken)).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public override async Task StopAsync(CancellationToken ct)
+    {
+        // サービス停止時に照明が ON であれば OFF にする
+        if (_isLightOn)
+        {
+            LogStoppingService(_logger);
+            await _lightControl.SetLightStateAsync(false, ct).ConfigureAwait(false);
+        }
+
+        await base.StopAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public override void Dispose()
+    {
+        _stateLock.Dispose();
+        base.Dispose();
+    }
+
     /// <summary>
     /// 高頻度チェックループ。操作復帰（アイドル解除）を素早く検知して照明を ON にする。
     /// </summary>
@@ -64,12 +87,20 @@ internal sealed partial class IdleDetectionService(
                 TimeSpan idleTime = Win32.GetIdleTime();
                 var threshold = TimeSpan.FromSeconds(_opts.ThresholdSeconds);
 
-                // アイドル時間が閾値未満かつ照明が OFF の場合、照明を ON にする
-                if (idleTime < threshold && !_running)
+                await _stateLock.WaitAsync(ct).ConfigureAwait(false);
+                try
                 {
-                    LogActivityDetectedFast(_logger, idleTime);
-                    await _lightControl.SetLightStateAsync(true, ct).ConfigureAwait(false);
-                    _running = true;
+                    // アイドル時間が閾値未満かつ照明が OFF の場合、照明を ON にする
+                    if (idleTime < threshold && !_isLightOn)
+                    {
+                        LogActivityDetectedFast(_logger, idleTime);
+                        await _lightControl.SetLightStateAsync(true, ct).ConfigureAwait(false);
+                        _isLightOn = true;
+                    }
+                }
+                finally
+                {
+                    _stateLock.Release();
                 }
             }
         }
@@ -95,19 +126,27 @@ internal sealed partial class IdleDetectionService(
                 TimeSpan idleTime = Win32.GetIdleTime();
                 var threshold = TimeSpan.FromSeconds(_opts.ThresholdSeconds);
 
-                if (idleTime >= threshold && _running)
+                await _stateLock.WaitAsync(ct).ConfigureAwait(false);
+                try
                 {
-                    // アイドル時間が閾値以上かつ照明が ON の場合、照明を OFF にする
-                    LogIdleThresholdExceeded(_logger, idleTime);
-                    await _lightControl.SetLightStateAsync(false, ct).ConfigureAwait(false);
-                    _running = false;
+                    if (idleTime >= threshold && _isLightOn)
+                    {
+                        // アイドル時間が閾値以上かつ照明が ON の場合、照明を OFF にする
+                        LogIdleThresholdExceeded(_logger, idleTime);
+                        await _lightControl.SetLightStateAsync(false, ct).ConfigureAwait(false);
+                        _isLightOn = false;
+                    }
+                    else if (idleTime < threshold && !_isLightOn)
+                    {
+                        // アイドル時間が閾値未満かつ照明が OFF の場合、照明を ON にする
+                        LogActivityDetectedSlow(_logger, idleTime);
+                        await _lightControl.SetLightStateAsync(true, ct).ConfigureAwait(false);
+                        _isLightOn = true;
+                    }
                 }
-                else if (idleTime < threshold && !_running)
+                finally
                 {
-                    // アイドル時間が閾値未満かつ照明が OFF の場合、照明を ON にする
-                    LogActivityDetectedSlow(_logger, idleTime);
-                    await _lightControl.SetLightStateAsync(true, ct).ConfigureAwait(false);
-                    _running = true;
+                    _stateLock.Release();
                 }
             }
         }
@@ -130,11 +169,19 @@ internal sealed partial class IdleDetectionService(
         {
             while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
             {
-                // 照明が OFF 状態のとき、念のため OFF を再送する
-                if (!_running)
+                await _stateLock.WaitAsync(ct).ConfigureAwait(false);
+                try
                 {
-                    LogPeriodicResend(_logger);
-                    await _lightControl.SetLightStateAsync(false, ct).ConfigureAwait(false);
+                    // 照明が OFF 状態のとき、念のため OFF を再送する
+                    if (!_isLightOn)
+                    {
+                        LogPeriodicResend(_logger);
+                        await _lightControl.SetLightStateAsync(false, ct).ConfigureAwait(false);
+                    }
+                }
+                finally
+                {
+                    _stateLock.Release();
                 }
             }
         }
@@ -143,19 +190,6 @@ internal sealed partial class IdleDetectionService(
             // TaskCanceledException は OperationCanceledException の派生型なので一括でキャッチする
             LogResendCancelled(_logger);
         }
-    }
-
-    /// <inheritdoc />
-    public override async Task StopAsync(CancellationToken ct)
-    {
-        // サービス停止時に照明が ON であれば OFF にする
-        if (_running)
-        {
-            LogStoppingService(_logger);
-            await _lightControl.SetLightStateAsync(false, ct).ConfigureAwait(false);
-        }
-
-        await base.StopAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>操作復帰（高頻度チェック）を検知したことをログ出力する。</summary>
