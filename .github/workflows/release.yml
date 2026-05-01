@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  bump-version:
+    name: Bump version
+    runs-on: ubuntu-latest
+
+    outputs:
+      version: ${{ steps.tag-version.outputs.new_version }}
+      tag: ${{ steps.tag-version.outputs.new_tag }}
+      changelog: ${{ steps.tag-version.outputs.changelog }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Bump version and push tag
+        id: tag-version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: "minor"
+          custom_release_rules: "feat:minor:✨ Features,fix:patch:🐛 Fixes,docs:patch:📰 Docs,chore:patch:🎨 Chore,pref:patch:🎈 Performance improvements,refactor:patch:🧹 Refactoring,build:patch:🔍 Build,ci:patch:🔍 CI,revert:patch:⏪ Revert,style:patch:🧹 Style,test:patch:👀 Test,release:major:📦 Release"
+
+  build-and-release:
+    name: Build and Release
+    runs-on: windows-latest
+    needs: bump-version
+
+    env:
+      version: ${{ needs.bump-version.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Set version from tag
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ needs.bump-version.outputs.version }}
+        run: |
+          $version = $env:APP_VERSION
+          $versionWithRevision = ($version.Split('.') + '0')[0..3] -join '.'
+          "version=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "version_with_revision=$versionWithRevision" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Restore dotnet packages
+        run: dotnet restore IdlingLightManager.slnx
+
+      - name: Publish solution
+        run: dotnet publish IdlingLightManager.slnx -p:PublishProfile=Publish -p:Version=${{ env.version }} -p:AssemblyVersion=${{ env.version_with_revision }} -p:FileVersion=${{ env.version_with_revision }}
+
+      - name: Create zip
+        shell: pwsh
+        run: |
+          $publishDir = Get-ChildItem -Path . -Filter publish -Recurse -Directory |
+            Select-Object -First 1 -ExpandProperty FullName
+          Compress-Archive -Path "$publishDir\*" -DestinationPath IdlingLightManager.zip -Force
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ needs.bump-version.outputs.changelog }}
+          tag_name: ${{ needs.bump-version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          files: IdlingLightManager.zip
