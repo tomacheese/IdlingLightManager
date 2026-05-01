@@ -64,19 +64,14 @@ jobs:
         run: |
           $version = $env:APP_VERSION
           $versionWithRevision = ($version.Split('.') + '0')[0..3] -join '.'
-          $csproj = 'IdlingLightManager\IdlingLightManager.csproj'
-          (Get-Content $csproj) -replace '<Version>[^<]*</Version>', "<Version>$version</Version>" |
-            Set-Content $csproj
-          (Get-Content $csproj) -replace '<AssemblyVersion>[^<]*</AssemblyVersion>', "<AssemblyVersion>$versionWithRevision</AssemblyVersion>" |
-            Set-Content $csproj
-          (Get-Content $csproj) -replace '<FileVersion>[^<]*</FileVersion>', "<FileVersion>$versionWithRevision</FileVersion>" |
-            Set-Content $csproj
+          "version=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "version_with_revision=$versionWithRevision" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Restore dotnet packages
         run: dotnet restore IdlingLightManager.slnx
 
       - name: Publish solution
-        run: dotnet publish IdlingLightManager.slnx -p:PublishProfile=Publish
+        run: dotnet publish IdlingLightManager.slnx -p:PublishProfile=Publish -p:Version=${{ env.version }} -p:AssemblyVersion=${{ env.version_with_revision }} -p:FileVersion=${{ env.version_with_revision }}
 
       - name: Create zip
         shell: pwsh
