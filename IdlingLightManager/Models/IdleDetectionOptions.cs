@@ -19,4 +19,7 @@ internal sealed class IdleDetectionOptions
 
     /// <summary>アイドル中の定期再送間隔（分）。照明が意図せず ON になった場合の保険。</summary>
     public int PeriodicResendIntervalMinutes { get; init; } = 10;
+
+    /// <summary>照明 OFF 直後に ON を抑制するクールダウン期間（秒）。ワイヤレスデバイスの再接続などによる誤検知を防ぐ。</summary>
+    public int CooldownSeconds { get; init; } = 60;
 }

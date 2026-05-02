@@ -30,6 +30,12 @@ internal sealed partial class IdleDetectionService(
     /// <summary>照明の現在の状態。true = ON、false = OFF。</summary>
     private volatile bool _isLightOn = true;
 
+    /// <summary>
+    /// 照明を OFF にした時刻。クールダウン期間の起点として使用する。
+    /// <see cref="_stateLock"/> 保持中のみアクセスする。
+    /// </summary>
+    private DateTime? _lightOffAt;
+
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -93,9 +99,18 @@ internal sealed partial class IdleDetectionService(
                     // アイドル時間が閾値未満かつ照明が OFF の場合、照明を ON にする
                     if (idleTime < threshold && !_isLightOn)
                     {
-                        LogActivityDetectedFast(_logger, idleTime);
-                        await _lightControl.SetLightStateAsync(true, ct).ConfigureAwait(false);
-                        _isLightOn = true;
+                        if (!HasNewInputAfterCooldown(idleTime))
+                        {
+                            DateTime cooldownEnd = _lightOffAt!.Value + TimeSpan.FromSeconds(_opts.CooldownSeconds);
+                            LogOnSuppressed(_logger, cooldownEnd, DateTime.UtcNow - idleTime);
+                        }
+                        else
+                        {
+                            LogActivityDetectedFast(_logger, idleTime);
+                            await _lightControl.SetLightStateAsync(true, ct).ConfigureAwait(false);
+                            _isLightOn = true;
+                            _lightOffAt = null;
+                        }
                     }
                 }
                 finally
@@ -135,13 +150,23 @@ internal sealed partial class IdleDetectionService(
                         LogIdleThresholdExceeded(_logger, idleTime);
                         await _lightControl.SetLightStateAsync(false, ct).ConfigureAwait(false);
                         _isLightOn = false;
+                        _lightOffAt = DateTime.UtcNow;
                     }
                     else if (idleTime < threshold && !_isLightOn)
                     {
                         // アイドル時間が閾値未満かつ照明が OFF の場合、照明を ON にする
-                        LogActivityDetectedSlow(_logger, idleTime);
-                        await _lightControl.SetLightStateAsync(true, ct).ConfigureAwait(false);
-                        _isLightOn = true;
+                        if (!HasNewInputAfterCooldown(idleTime))
+                        {
+                            DateTime cooldownEnd = _lightOffAt!.Value + TimeSpan.FromSeconds(_opts.CooldownSeconds);
+                            LogOnSuppressed(_logger, cooldownEnd, DateTime.UtcNow - idleTime);
+                        }
+                        else
+                        {
+                            LogActivityDetectedSlow(_logger, idleTime);
+                            await _lightControl.SetLightStateAsync(true, ct).ConfigureAwait(false);
+                            _isLightOn = true;
+                            _lightOffAt = null;
+                        }
                     }
                 }
                 finally
@@ -192,6 +217,22 @@ internal sealed partial class IdleDetectionService(
         }
     }
 
+    /// <summary>
+    /// クールダウン終了後に新しい入力が発生したかどうかを返す。ON 遷移の許可条件として使用する。
+    /// クールダウン期間中は常に <see langword="false"/> を返す。また、クールダウン終了後であっても、
+    /// 最後の入力がクールダウン終了前のもの（照明 OFF 前後のデバイス再接続等）であれば <see langword="false"/> を返す。
+    /// <see cref="_stateLock"/> 保持中のみ呼び出すこと。
+    /// </summary>
+    /// <param name="idleTime">現在のアイドル時間。</param>
+    /// <returns>クールダウン終了後に新しい入力が発生していれば <see langword="true"/>。</returns>
+    private bool HasNewInputAfterCooldown(TimeSpan idleTime)
+    {
+        if (!_lightOffAt.HasValue) return true;
+        DateTime cooldownEnd = _lightOffAt.Value + TimeSpan.FromSeconds(_opts.CooldownSeconds);
+        DateTime lastInputAt = DateTime.UtcNow - idleTime;
+        return lastInputAt > cooldownEnd;
+    }
+
     /// <summary>操作復帰（高頻度チェック）を検知したことをログ出力する。</summary>
     [LoggerMessage(Level = LogLevel.Information, Message = "操作が検知されました（高頻度）。照明を ON にします。IdleTime={IdleTime}")]
     private static partial void LogActivityDetectedFast(ILogger<IdleDetectionService> logger, TimeSpan idleTime);
@@ -219,6 +260,10 @@ internal sealed partial class IdleDetectionService(
     /// <summary>定期再送ループのキャンセルをログ出力する。</summary>
     [LoggerMessage(Level = LogLevel.Warning, Message = "定期再送ループがキャンセルされました（正常終了）。")]
     private static partial void LogResendCancelled(ILogger<IdleDetectionService> logger);
+
+    /// <summary>クールダウン期間中または終了後の新規入力なしのため照明 ON を抑制したことをログ出力する。</summary>
+    [LoggerMessage(Level = LogLevel.Debug, Message = "照明 ON を抑制します（クールダウン中またはクールダウン後の新規入力なし）。CooldownEnd={CooldownEnd}, LastInputAt={LastInputAt}")]
+    private static partial void LogOnSuppressed(ILogger<IdleDetectionService> logger, DateTime cooldownEnd, DateTime lastInputAt);
 
     /// <summary>サービス停止時の照明 OFF 送信をログ出力する。</summary>
     [LoggerMessage(Level = LogLevel.Information, Message = "サービスを停止します。照明を OFF にします。")]
