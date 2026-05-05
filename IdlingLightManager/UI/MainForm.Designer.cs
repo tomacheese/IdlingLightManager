@@ -1,4 +1,6 @@
 #nullable enable
+using System.Reflection;
+
 namespace IdlingLightManager.UI;
 
 partial class MainForm
@@ -7,6 +9,9 @@ partial class MainForm
     /// 使用中のデザイナー変数。
     /// </summary>
     private System.ComponentModel.IContainer? components = null;
+
+    /// <summary>アプリケーションアイコン。フォームと NotifyIcon で共用する。</summary>
+    private Icon? _appIcon;
 
     private ListView logView = null!;
     private Button button1 = null!;
@@ -35,6 +40,12 @@ partial class MainForm
         {
             components.Dispose();
         }
+
+        if (disposing)
+        {
+            _appIcon?.Dispose();
+        }
+
         base.Dispose(disposing);
     }
 
@@ -45,6 +56,11 @@ partial class MainForm
     private void InitializeComponent()
     {
         components = new System.ComponentModel.Container();
+
+        // アセンブリに埋め込まれたアイコンをロードする
+        using var iconStream = Assembly.GetExecutingAssembly()
+            .GetManifestResourceStream("IdlingLightManager.Resources.app.ico")!;
+        _appIcon = new Icon(iconStream);
 
         // --- LogView (ListView) ---
         logView = new ListView();
@@ -99,7 +115,7 @@ partial class MainForm
         notifyIcon = new NotifyIcon(components);
         notifyIcon.Text = "IdlingLightManager";
         notifyIcon.Visible = true;
-        notifyIcon.Icon = SystemIcons.Application;
+        notifyIcon.Icon = _appIcon;
         notifyIcon.ContextMenuStrip = trayContextMenu;
         notifyIcon.MouseDoubleClick += OnNotifyIconMouseDoubleClick;
 
@@ -108,6 +124,7 @@ partial class MainForm
         ShowInTaskbar = false;
         WindowState = FormWindowState.Minimized;
         Text = "IdlingLightManager";
+        Icon = _appIcon;
 
         Controls.Add(logView);
         Controls.Add(button1);
