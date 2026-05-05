@@ -59,7 +59,9 @@ partial class MainForm
 
         // アセンブリに埋め込まれたアイコンをロードする
         using var iconStream = Assembly.GetExecutingAssembly()
-            .GetManifestResourceStream("IdlingLightManager.Resources.app.ico")!;
+            .GetManifestResourceStream("IdlingLightManager.Resources.app.ico")
+            ?? throw new InvalidOperationException(
+                "Embedded resource 'IdlingLightManager.Resources.app.ico' was not found.");
         _appIcon = new Icon(iconStream);
 
         // --- LogView (ListView) ---
