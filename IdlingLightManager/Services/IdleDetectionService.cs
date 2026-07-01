@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using IdlingLightManager.Interop;
 using IdlingLightManager.Models;
 using Microsoft.Extensions.Hosting;
@@ -37,6 +38,13 @@ internal sealed partial class IdleDetectionService(
     /// </summary>
     private DateTime? _lightOffAt;
 
+    /// <summary>
+    /// OS の電源状態変化（Suspend/Resume）を受信順に直列処理するためのキュー。
+    /// <see cref="SystemEvents.PowerModeChanged"/> の発火順を保ったまま <see cref="RunPowerEventLoopAsync"/> で処理する。
+    /// </summary>
+    private readonly Channel<PowerModes> _powerEventChannel = Channel.CreateUnbounded<PowerModes>(
+        new UnboundedChannelOptions { SingleReader = true });
+
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -56,26 +64,36 @@ internal sealed partial class IdleDetectionService(
             // 定期再送用タイマー（アイドル中に照明が意図せず ON になった場合の保険）
             using var resendTimer = new PeriodicTimer(TimeSpan.FromMinutes(_opts.PeriodicResendIntervalMinutes));
 
-            // 3 つのループを並列実行する
+            // 4 つのループを並列実行する
             await Task.WhenAll(
                 RunFastCheckAsync(fastTimer, stoppingToken),
                 RunSlowCheckAsync(slowTimer, stoppingToken),
-                RunResendAsync(resendTimer, stoppingToken)).ConfigureAwait(false);
+                RunResendAsync(resendTimer, stoppingToken),
+                RunPowerEventLoopAsync(stoppingToken)).ConfigureAwait(false);
         }
         finally
         {
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            _powerEventChannel.Writer.TryComplete();
         }
     }
 
     /// <inheritdoc />
     public override async Task StopAsync(CancellationToken ct)
     {
-        // サービス停止時に照明が ON であれば OFF にする
-        if (_isLightOn)
+        await _stateLock.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            LogStoppingService(_logger);
-            await _lightControl.SetLightStateAsync(false, ct).ConfigureAwait(false);
+            // サービス停止時に照明が ON であれば OFF にする
+            if (_isLightOn)
+            {
+                LogStoppingService(_logger);
+                await TurnOffLightAsync(ct).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _stateLock.Release();
         }
 
         await base.StopAsync(ct).ConfigureAwait(false);
@@ -158,9 +176,7 @@ internal sealed partial class IdleDetectionService(
                     {
                         // アイドル時間が閾値以上かつ照明が ON の場合、照明を OFF にする
                         LogIdleThresholdExceeded(_logger, idleTime);
-                        await _lightControl.SetLightStateAsync(false, ct).ConfigureAwait(false);
-                        _isLightOn = false;
-                        _lightOffAt = DateTime.UtcNow;
+                        await TurnOffLightAsync(ct).ConfigureAwait(false);
                     }
                     else if (idleTime < threshold && !_isLightOn)
                     {
@@ -229,6 +245,7 @@ internal sealed partial class IdleDetectionService(
 
     /// <summary>
     /// OS の電源状態変化（スリープ／休止状態への移行・復帰）を検知するハンドラー。
+    /// 発火順を保つため、処理自体は行わずキューへ積んで <see cref="RunPowerEventLoopAsync"/> に委ねる。
     /// </summary>
     /// <param name="sender">イベント送信元オブジェクト。</param>
     /// <param name="e">電源状態変化イベントデータ。</param>
@@ -238,12 +255,12 @@ internal sealed partial class IdleDetectionService(
         {
             case PowerModes.Suspend:
                 LogSystemSuspending(_logger);
-                FireAndForget(HandleSuspendAsync);
+                _powerEventChannel.Writer.TryWrite(PowerModes.Suspend);
                 break;
 
             case PowerModes.Resume:
                 LogSystemResumed(_logger);
-                FireAndForget(HandleResumeAsync);
+                _powerEventChannel.Writer.TryWrite(PowerModes.Resume);
                 break;
 
             case PowerModes.StatusChange:
@@ -256,24 +273,43 @@ internal sealed partial class IdleDetectionService(
     }
 
     /// <summary>
-    /// 指定した非同期処理を fire-and-forget で実行する。例外は再スローせずログに記録する。
+    /// 電源状態イベント（スリープ移行・復帰）を受信順に直列処理するループ。
+    /// <see cref="OnPowerModeChanged"/> から積まれたイベントを FIFO で処理することで、
+    /// 移行・復帰の処理順序が入れ替わることによる <see cref="_lightOffAt"/> の誤上書きを防ぐ。
     /// </summary>
-    /// <param name="action">実行する非同期処理。</param>
-    private void FireAndForget(Func<Task> action) => _ = Task.Run(async () =>
+    /// <param name="ct">キャンセルトークン。</param>
+    /// <returns>非同期操作を表すタスク。</returns>
+    private async Task RunPowerEventLoopAsync(CancellationToken ct)
     {
         try
         {
-            await action().ConfigureAwait(false);
+            await foreach (PowerModes mode in _powerEventChannel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            {
+                try
+                {
+                    if (mode == PowerModes.Suspend)
+                        await HandleSuspendAsync().ConfigureAwait(false);
+                    else if (mode == PowerModes.Resume)
+                        await HandleResumeAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    // 1 件の処理失敗でループ自体を止めず、以降のイベントも処理を継続する
+                    LogPowerEventHandlingError(_logger, ex);
+                }
+            }
         }
-        catch (Exception ex)
+        catch (OperationCanceledException)
         {
-            LogPowerEventHandlingError(_logger, ex);
+            // TaskCanceledException は OperationCanceledException の派生型なので一括でキャッチする
+            LogPowerEventLoopCancelled(_logger);
         }
-    });
+    }
 
     /// <summary>
     /// スリープ／休止状態への移行時に照明を OFF にする。
     /// アイドル閾値未到達でも即座に OFF にすることで、就寝時などの消灯漏れを防ぐ。
+    /// すでに OFF の場合は状態を変更せず、クールダウンの起点も更新しない。
     /// </summary>
     /// <returns>非同期操作を表すタスク。</returns>
     private async Task HandleSuspendAsync()
@@ -282,13 +318,7 @@ internal sealed partial class IdleDetectionService(
         try
         {
             if (_isLightOn)
-            {
-                await _lightControl.SetLightStateAsync(false, CancellationToken.None).ConfigureAwait(false);
-                _isLightOn = false;
-            }
-
-            // 移行時点をクールダウンの起点として記録する
-            _lightOffAt = DateTime.UtcNow;
+                await TurnOffLightAsync(CancellationToken.None).ConfigureAwait(false);
         }
         finally
         {
@@ -314,6 +344,19 @@ internal sealed partial class IdleDetectionService(
         {
             _stateLock.Release();
         }
+    }
+
+    /// <summary>
+    /// 照明を OFF にし、状態とクールダウンの起点を更新する。
+    /// <see cref="_stateLock"/> 保持中のみ呼び出すこと。
+    /// </summary>
+    /// <param name="ct">キャンセルトークン。</param>
+    /// <returns>非同期操作を表すタスク。</returns>
+    private async Task TurnOffLightAsync(CancellationToken ct)
+    {
+        await _lightControl.SetLightStateAsync(false, ct).ConfigureAwait(false);
+        _isLightOn = false;
+        _lightOffAt = DateTime.UtcNow;
     }
 
     /// <summary>
@@ -379,4 +422,8 @@ internal sealed partial class IdleDetectionService(
     /// <summary>電源状態変化ハンドラーの処理中に発生した例外をログ出力する。</summary>
     [LoggerMessage(Level = LogLevel.Error, Message = "電源状態変化ハンドラーの処理中にエラーが発生しました。")]
     private static partial void LogPowerEventHandlingError(ILogger<IdleDetectionService> logger, Exception exception);
+
+    /// <summary>電源状態イベント処理ループのキャンセルをログ出力する。</summary>
+    [LoggerMessage(Level = LogLevel.Warning, Message = "電源状態イベント処理ループがキャンセルされました（正常終了）。")]
+    private static partial void LogPowerEventLoopCancelled(ILogger<IdleDetectionService> logger);
 }
