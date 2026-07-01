@@ -3,6 +3,7 @@ using IdlingLightManager.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Win32;
 
 namespace IdlingLightManager.Services;
 
@@ -39,23 +40,32 @@ internal sealed partial class IdleDetectionService(
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // 起動時に照明を ON にする
-        await _lightControl.SetLightStateAsync(true, stoppingToken).ConfigureAwait(false);
+        // OS のスリープ／休止状態への移行・復帰を検知するためにイベントを登録する
+        SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        try
+        {
+            // 起動時に照明を ON にする
+            await _lightControl.SetLightStateAsync(true, stoppingToken).ConfigureAwait(false);
 
-        // 高頻度チェック用タイマー（操作復帰を素早く検知する）
-        using var fastTimer = new PeriodicTimer(TimeSpan.FromSeconds(_opts.CheckIntervalSeconds));
+            // 高頻度チェック用タイマー（操作復帰を素早く検知する）
+            using var fastTimer = new PeriodicTimer(TimeSpan.FromSeconds(_opts.CheckIntervalSeconds));
 
-        // 低頻度チェック用タイマー（アイドル超過を判定する）
-        using var slowTimer = new PeriodicTimer(TimeSpan.FromSeconds(_opts.SlowCheckIntervalSeconds));
+            // 低頻度チェック用タイマー（アイドル超過を判定する）
+            using var slowTimer = new PeriodicTimer(TimeSpan.FromSeconds(_opts.SlowCheckIntervalSeconds));
 
-        // 定期再送用タイマー（アイドル中に照明が意図せず ON になった場合の保険）
-        using var resendTimer = new PeriodicTimer(TimeSpan.FromMinutes(_opts.PeriodicResendIntervalMinutes));
+            // 定期再送用タイマー（アイドル中に照明が意図せず ON になった場合の保険）
+            using var resendTimer = new PeriodicTimer(TimeSpan.FromMinutes(_opts.PeriodicResendIntervalMinutes));
 
-        // 3 つのループを並列実行する
-        await Task.WhenAll(
-            RunFastCheckAsync(fastTimer, stoppingToken),
-            RunSlowCheckAsync(slowTimer, stoppingToken),
-            RunResendAsync(resendTimer, stoppingToken)).ConfigureAwait(false);
+            // 3 つのループを並列実行する
+            await Task.WhenAll(
+                RunFastCheckAsync(fastTimer, stoppingToken),
+                RunSlowCheckAsync(slowTimer, stoppingToken),
+                RunResendAsync(resendTimer, stoppingToken)).ConfigureAwait(false);
+        }
+        finally
+        {
+            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        }
     }
 
     /// <inheritdoc />
@@ -218,6 +228,95 @@ internal sealed partial class IdleDetectionService(
     }
 
     /// <summary>
+    /// OS の電源状態変化（スリープ／休止状態への移行・復帰）を検知するハンドラー。
+    /// </summary>
+    /// <param name="sender">イベント送信元オブジェクト。</param>
+    /// <param name="e">電源状態変化イベントデータ。</param>
+    private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
+    {
+        switch (e.Mode)
+        {
+            case PowerModes.Suspend:
+                LogSystemSuspending(_logger);
+                FireAndForget(HandleSuspendAsync);
+                break;
+
+            case PowerModes.Resume:
+                LogSystemResumed(_logger);
+                FireAndForget(HandleResumeAsync);
+                break;
+
+            case PowerModes.StatusChange:
+                // バッテリー状態変化など、スリープ／休止状態と無関係な通知のため無視する
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 指定した非同期処理を fire-and-forget で実行する。例外は再スローせずログに記録する。
+    /// </summary>
+    /// <param name="action">実行する非同期処理。</param>
+    private void FireAndForget(Func<Task> action) => _ = Task.Run(async () =>
+    {
+        try
+        {
+            await action().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            LogPowerEventHandlingError(_logger, ex);
+        }
+    });
+
+    /// <summary>
+    /// スリープ／休止状態への移行時に照明を OFF にする。
+    /// アイドル閾値未到達でも即座に OFF にすることで、就寝時などの消灯漏れを防ぐ。
+    /// </summary>
+    /// <returns>非同期操作を表すタスク。</returns>
+    private async Task HandleSuspendAsync()
+    {
+        await _stateLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_isLightOn)
+            {
+                await _lightControl.SetLightStateAsync(false, CancellationToken.None).ConfigureAwait(false);
+                _isLightOn = false;
+            }
+
+            // 移行時点をクールダウンの起点として記録する
+            _lightOffAt = DateTime.UtcNow;
+        }
+        finally
+        {
+            _stateLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// スリープ／休止状態からの復帰時にクールダウンを再開する。
+    /// 復帰直後はデバイス再接続等による誤検知の可能性があるため、
+    /// クールダウン期間を経た実際の新規入力を待って照明を ON にする。
+    /// </summary>
+    /// <returns>非同期操作を表すタスク。</returns>
+    private async Task HandleResumeAsync()
+    {
+        await _stateLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            // 復帰時点を新たなクールダウンの起点とする
+            _lightOffAt = DateTime.UtcNow;
+        }
+        finally
+        {
+            _stateLock.Release();
+        }
+    }
+
+    /// <summary>
     /// クールダウン終了後に新しい入力が発生したかどうかを返す。ON 遷移の許可条件として使用する。
     /// クールダウン期間中は常に <see langword="false"/> を返す。また、クールダウン終了後であっても、
     /// 最後の入力がクールダウン終了前のもの（照明 OFF 前後のデバイス再接続等）であれば <see langword="false"/> を返す。
@@ -268,4 +367,16 @@ internal sealed partial class IdleDetectionService(
     /// <summary>サービス停止時の照明 OFF 送信をログ出力する。</summary>
     [LoggerMessage(Level = LogLevel.Information, Message = "サービスを停止します。照明を OFF にします。")]
     private static partial void LogStoppingService(ILogger<IdleDetectionService> logger);
+
+    /// <summary>OS がスリープ／休止状態へ移行することをログ出力する。</summary>
+    [LoggerMessage(Level = LogLevel.Information, Message = "OS がスリープ／休止状態へ移行します。照明を OFF にします。")]
+    private static partial void LogSystemSuspending(ILogger<IdleDetectionService> logger);
+
+    /// <summary>OS がスリープ／休止状態から復帰したことをログ出力する。</summary>
+    [LoggerMessage(Level = LogLevel.Information, Message = "OS がスリープ／休止状態から復帰しました。クールダウンを再開します。")]
+    private static partial void LogSystemResumed(ILogger<IdleDetectionService> logger);
+
+    /// <summary>電源状態変化ハンドラーの処理中に発生した例外をログ出力する。</summary>
+    [LoggerMessage(Level = LogLevel.Error, Message = "電源状態変化ハンドラーの処理中にエラーが発生しました。")]
+    private static partial void LogPowerEventHandlingError(ILogger<IdleDetectionService> logger, Exception exception);
 }
