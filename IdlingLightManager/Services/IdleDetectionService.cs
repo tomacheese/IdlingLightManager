@@ -254,13 +254,15 @@ internal sealed partial class IdleDetectionService(
         switch (e.Mode)
         {
             case PowerModes.Suspend:
-                LogSystemSuspending(_logger);
-                _powerEventChannel.Writer.TryWrite(PowerModes.Suspend);
+                // キューイングに成功した場合のみログ出力する（シャットダウン中にキューが
+                // 完了済みで enqueue に失敗した場合、実際には処理されないため）
+                if (_powerEventChannel.Writer.TryWrite(PowerModes.Suspend))
+                    LogSystemSuspending(_logger);
                 break;
 
             case PowerModes.Resume:
-                LogSystemResumed(_logger);
-                _powerEventChannel.Writer.TryWrite(PowerModes.Resume);
+                if (_powerEventChannel.Writer.TryWrite(PowerModes.Resume))
+                    LogSystemResumed(_logger);
                 break;
 
             case PowerModes.StatusChange:
