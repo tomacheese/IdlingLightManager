@@ -288,9 +288,9 @@ internal sealed partial class IdleDetectionService(
                 try
                 {
                     if (mode == PowerModes.Suspend)
-                        await HandleSuspendAsync().ConfigureAwait(false);
+                        await HandleSuspendAsync(ct).ConfigureAwait(false);
                     else if (mode == PowerModes.Resume)
-                        await HandleResumeAsync().ConfigureAwait(false);
+                        await HandleResumeAsync(ct).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -311,14 +311,22 @@ internal sealed partial class IdleDetectionService(
     /// アイドル閾値未到達でも即座に OFF にすることで、就寝時などの消灯漏れを防ぐ。
     /// すでに OFF の場合は状態を変更せず、クールダウンの起点も更新しない。
     /// </summary>
+    /// <param name="ct">キャンセルトークン。ロック取得待ちにのみ適用され、消灯 API 呼び出し自体には適用しない。</param>
     /// <returns>非同期操作を表すタスク。</returns>
-    private async Task HandleSuspendAsync()
+    private async Task HandleSuspendAsync(CancellationToken ct)
     {
-        await _stateLock.WaitAsync().ConfigureAwait(false);
+        await _stateLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             if (_isLightOn)
+            {
+                LogSuspendTurningOff(_logger);
+
+                // OS のスリープ移行処理はアプリ自身の停止トークンとは無関係に進むため、
+                // 消灯 API 呼び出しはアプリの停止トークンで中断せず完了させる
+                // （就寝時などにアプリ終了と同時にスリープした場合の消灯漏れを防ぐ）
                 await TurnOffLightAsync(CancellationToken.None).ConfigureAwait(false);
+            }
         }
         finally
         {
@@ -331,10 +339,11 @@ internal sealed partial class IdleDetectionService(
     /// 復帰直後はデバイス再接続等による誤検知の可能性があるため、
     /// クールダウン期間を経た実際の新規入力を待って照明を ON にする。
     /// </summary>
+    /// <param name="ct">キャンセルトークン。</param>
     /// <returns>非同期操作を表すタスク。</returns>
-    private async Task HandleResumeAsync()
+    private async Task HandleResumeAsync(CancellationToken ct)
     {
-        await _stateLock.WaitAsync().ConfigureAwait(false);
+        await _stateLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             // 復帰時点を新たなクールダウンの起点とする
@@ -412,8 +421,12 @@ internal sealed partial class IdleDetectionService(
     private static partial void LogStoppingService(ILogger<IdleDetectionService> logger);
 
     /// <summary>OS がスリープ／休止状態へ移行することをログ出力する。</summary>
-    [LoggerMessage(Level = LogLevel.Information, Message = "OS がスリープ／休止状態へ移行します。照明を OFF にします。")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "OS がスリープ／休止状態へ移行します。")]
     private static partial void LogSystemSuspending(ILogger<IdleDetectionService> logger);
+
+    /// <summary>スリープ／休止状態への移行に伴い照明を OFF にすることをログ出力する。</summary>
+    [LoggerMessage(Level = LogLevel.Information, Message = "スリープ移行に伴い照明を OFF にします。")]
+    private static partial void LogSuspendTurningOff(ILogger<IdleDetectionService> logger);
 
     /// <summary>OS がスリープ／休止状態から復帰したことをログ出力する。</summary>
     [LoggerMessage(Level = LogLevel.Information, Message = "OS がスリープ／休止状態から復帰しました。クールダウンを再開します。")]
