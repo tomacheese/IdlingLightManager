@@ -6,11 +6,11 @@ namespace IdlingLightManager.UI;
 partial class MainForm
 {
     /// <summary>
-    /// 使用中のデザイナー変数。
+    /// Required designer variable.
     /// </summary>
     private System.ComponentModel.IContainer? components = null;
 
-    /// <summary>アプリケーションアイコン。フォームと NotifyIcon で共用する。</summary>
+    /// <summary>Application icon, shared by the form and the NotifyIcon.</summary>
     private Icon? _appIcon;
 
     private ListView logView = null!;
@@ -26,14 +26,14 @@ partial class MainForm
     private ToolStripMenuItem menuItemExit = null!;
 
     /// <summary>
-    /// ログを表示する ListView。
+    /// Gets the ListView that displays the log.
     /// </summary>
     public ListView LogView => logView;
 
     /// <summary>
-    /// 使用中のリソースをすべてクリーンアップする。
+    /// Cleans up any resources being used.
     /// </summary>
-    /// <param name="disposing">マネージリソースを破棄する場合は <c>true</c>、それ以外は <c>false</c>。</param>
+    /// <param name="disposing"><c>true</c> to dispose managed resources; otherwise <c>false</c>.</param>
     protected override void Dispose(bool disposing)
     {
         if (disposing && (components != null))
@@ -50,14 +50,14 @@ partial class MainForm
     }
 
     /// <summary>
-    /// デザイナーで生成されたコードでサポートされているメソッド。
-    /// このメソッドの内容をコードエディターで変更しないでください。
+    /// Method required for designer support.
+    /// Do not modify the contents of this method with the code editor.
     /// </summary>
     private void InitializeComponent()
     {
         components = new System.ComponentModel.Container();
 
-        // アセンブリに埋め込まれたアイコンをロードする
+        // Load the icon embedded in the assembly
         using var iconStream = Assembly.GetExecutingAssembly()
             .GetManifestResourceStream("IdlingLightManager.Resources.app.ico")
             ?? throw new InvalidOperationException(
@@ -99,7 +99,7 @@ partial class MainForm
         button3.Text = "Exit";
         button3.Click += OnExitClick;
 
-        // --- トレイアイコンの右クリックメニュー ---
+        // --- Tray icon context menu ---
         menuItemOpen = new ToolStripMenuItem("開く");
         menuItemOpen.Click += OnMenuItemOpenClick;
         menuItemPcStart = new ToolStripMenuItem("照明 ON (PCStart)");
@@ -121,7 +121,7 @@ partial class MainForm
         notifyIcon.ContextMenuStrip = trayContextMenu;
         notifyIcon.MouseDoubleClick += OnNotifyIconMouseDoubleClick;
 
-        // --- フォーム本体の設定 ---
+        // --- Form settings ---
         ClientSize = new Size(800, 450);
         ShowInTaskbar = false;
         WindowState = FormWindowState.Minimized;
@@ -133,7 +133,7 @@ partial class MainForm
         Controls.Add(button2);
         Controls.Add(button3);
 
-        // --- イベント接続 ---
+        // --- Event wiring ---
         this.Load += OnMainFormLoad;
         this.Resize += OnMainFormResize;
     }

@@ -16,26 +16,26 @@ using ILogger = Microsoft.Extensions.Logging.ILogger;
 namespace IdlingLightManager;
 
 /// <summary>
-/// アプリケーションのエントリーポイントクラス。
+/// Application entry point.
 /// </summary>
 [SuppressMessage("Microsoft.Maintainability", "CA1506:AvoidExcessiveClassCoupling", Justification = "Entry point necessarily couples many types.")]
 internal static partial class Program
 {
     /// <summary>
-    /// アプリケーションのエントリーポイント。Generic Host と WinForms メッセージループを統合する。
+    /// Application entry point. Integrates the Generic Host with the WinForms message loop.
     /// </summary>
     [STAThread]
     private static void Main()
     {
         ApplicationConfiguration.Initialize();
 
-        // ListViewSink はシングルトンとして保持し、後から ListView をセットする
+        // Held as a singleton; the target ListView is attached later (see MainForm).
         ListViewSink listViewSink = new();
 
         IHost host = Host.CreateDefaultBuilder()
             .ConfigureAppConfiguration((_, config) =>
             {
-                // appsettings.json のプレースホルダーを実値で上書きするローカル設定
+                // Local overlay (git-ignored) that overrides the placeholders in appsettings.json.
                 config.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: false);
             })
             .UseSerilog((ctx, cfg) =>
@@ -55,7 +55,7 @@ internal static partial class Program
                         "LightControl の設定が不完全です: DeviceId と ApiToken の設定が必要です。")
                     .ValidateOnStart();
 
-                // IHttpClientFactory 経由で HttpClient を注入し、ソケット再利用と DNS 更新に対応する
+                // Inject HttpClient via IHttpClientFactory for socket reuse and DNS refresh.
                 services.AddHttpClient<LightControlService>((sp, client) =>
                 {
                     LightControlOptions opts = sp.GetRequiredService<IOptions<LightControlOptions>>().Value;
@@ -67,14 +67,12 @@ internal static partial class Program
 
                 services.AddHostedService<IdleDetectionService>();
 
-                // ListViewSink をシングルトンとして DI コンテナに登録する
                 services.AddSingleton(listViewSink);
                 services.AddSingleton<MainForm>();
                 services.AddSingleton<TrayApplicationContext>();
             })
             .Build();
 
-        // 未処理例外をログに記録する
         ILoggerFactory loggerFactory = host.Services.GetRequiredService<ILoggerFactory>();
         ILogger appLogger = loggerFactory.CreateLogger("Program");
         Application.ThreadException += (_, e) =>
@@ -82,30 +80,28 @@ internal static partial class Program
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             LogDomainException(appLogger, e.ExceptionObject as Exception);
 
-        // Generic Host をバックグラウンドで起動する
         Task hostTask = host.RunAsync();
 
         TrayApplicationContext tray = host.Services.GetRequiredService<TrayApplicationContext>();
         Application.Run(tray);
 
-        // WinForms が終了したらホストも停止する
         host.StopAsync().GetAwaiter().GetResult();
         hostTask.GetAwaiter().GetResult();
     }
 
     /// <summary>
-    /// 未処理のスレッド例外をクリティカルレベルでログに記録する。
+    /// Logs an unhandled thread exception at critical level.
     /// </summary>
-    /// <param name="logger">ロガー。</param>
-    /// <param name="exception">発生した例外。</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="exception">The exception that occurred.</param>
     [LoggerMessage(Level = LogLevel.Critical, Message = "未処理のスレッド例外が発生しました。")]
     private static partial void LogThreadException(ILogger logger, Exception exception);
 
     /// <summary>
-    /// 未処理のドメイン例外をクリティカルレベルでログに記録する。
+    /// Logs an unhandled domain exception at critical level.
     /// </summary>
-    /// <param name="logger">ロガー。</param>
-    /// <param name="exception">発生した例外。null の場合もある。</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="exception">The exception that occurred; may be <see langword="null"/>.</param>
     [LoggerMessage(Level = LogLevel.Critical, Message = "未処理のドメイン例外が発生しました。")]
     private static partial void LogDomainException(ILogger logger, Exception? exception);
 }

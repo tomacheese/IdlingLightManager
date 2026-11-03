@@ -3,49 +3,49 @@ using System.Runtime.InteropServices;
 namespace IdlingLightManager.Interop;
 
 /// <summary>
-/// Win32 API の P/Invoke 宣言および関連構造体。
+/// P/Invoke declarations and related structures for the Win32 API.
 /// </summary>
-#pragma warning disable CA1060 // Win32 interop クラスとして適切な配置のため抑制
+#pragma warning disable CA1060 // Suppressed: this class is intentionally the Win32 interop container
 internal static class Win32
 {
     /// <summary>
-    /// マウス・キーボードの最終入力情報を格納する Win32 構造体。
+    /// Win32 structure that holds the last mouse/keyboard input information.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal struct LASTINPUTINFO
     {
-#pragma warning disable SA1307, IDE1006 // Win32 API 由来のフィールド名のため変更不可
-        /// <summary>構造体のバイトサイズ。呼び出し前に Marshal.SizeOf で設定する必要がある。</summary>
+#pragma warning disable SA1307, IDE1006 // Field names are dictated by the Win32 API
+        /// <summary>Size of the structure in bytes. Must be set with <c>Marshal.SizeOf</c> before the call.</summary>
         [MarshalAs(UnmanagedType.U4)]
         public uint cbSize;
 
-        /// <summary>最終入力時の TickCount（ミリ秒）。</summary>
+        /// <summary><c>TickCount</c> (milliseconds) at the time of the last input.</summary>
         [MarshalAs(UnmanagedType.U4)]
         public uint dwTime;
 #pragma warning restore SA1307, IDE1006
     }
 
     /// <summary>
-    /// マウス・キーボードの最終入力情報を取得する。
+    /// Retrieves the time of the last mouse/keyboard input.
     /// </summary>
-    /// <param name="plii">取得結果を格納する <see cref="LASTINPUTINFO"/> 構造体への参照。</param>
-    /// <returns>成功した場合は <c>true</c>、失敗した場合は <c>false</c>。</returns>
+    /// <param name="plii">Reference to the <see cref="LASTINPUTINFO"/> structure that receives the result.</param>
+    /// <returns><c>true</c> on success; otherwise <c>false</c>.</returns>
     [DllImport("user32.dll", SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
 
     /// <summary>
-    /// 最終入力からの経過時間を取得する。
+    /// Gets the time elapsed since the last input.
     /// </summary>
-    /// <returns>最終入力からの経過時間。取得失敗時は <see cref="TimeSpan.Zero"/>。</returns>
+    /// <returns>The elapsed time since the last input, or <see cref="TimeSpan.Zero"/> if it could not be retrieved.</returns>
     internal static TimeSpan GetIdleTime()
     {
         var info = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
         if (!GetLastInputInfo(ref info))
             return TimeSpan.Zero;
 
-        // uint キャストで TickCount の 49.7 日折り返しを正しく処理する
+        // The uint cast handles the 49.7-day TickCount wraparound correctly
         var elapsed = (uint)Environment.TickCount - info.dwTime;
         return TimeSpan.FromMilliseconds(elapsed);
     }

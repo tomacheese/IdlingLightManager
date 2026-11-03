@@ -6,26 +6,26 @@ using Microsoft.Extensions.Logging;
 namespace IdlingLightManager.UI;
 
 /// <summary>
-/// アプリケーションのメインフォーム。ログ表示と照明制御ボタンを提供する。
+/// Main form of the application. Provides the log view and light control buttons.
 /// </summary>
 [SuppressMessage("Microsoft.Performance", "CA1812:AvoidUninstantiatedInternalClasses", Justification = "Instantiated by dependency injection.")]
 internal sealed partial class MainForm : Form
 {
-    /// <summary>照明制御サービス。</summary>
+    /// <summary>Light control service.</summary>
     private readonly LightControlService _lightControlService;
 
-    /// <summary>ListView へログを出力するシンク。</summary>
+    /// <summary>Sink that writes logs to the ListView.</summary>
     private readonly ListViewSink _listViewSink;
 
-    /// <summary>ロガー。</summary>
+    /// <summary>Logger.</summary>
     private readonly ILogger<MainForm> _logger;
 
     /// <summary>
-    /// <see cref="MainForm"/> の新しいインスタンスを初期化する。
+    /// Initializes a new instance of the <see cref="MainForm"/> class.
     /// </summary>
-    /// <param name="lightControlService">照明制御サービス。</param>
-    /// <param name="listViewSink">ListView へログを出力するシンク。</param>
-    /// <param name="logger">ロガー。</param>
+    /// <param name="lightControlService">The light control service.</param>
+    /// <param name="listViewSink">The sink that writes logs to the ListView.</param>
+    /// <param name="logger">The logger.</param>
     public MainForm(
         LightControlService lightControlService,
         ListViewSink listViewSink,
@@ -39,20 +39,20 @@ internal sealed partial class MainForm : Form
     }
 
     /// <summary>
-    /// フォームロード時に ListViewSink のターゲットを設定する。
+    /// Sets the <see cref="ListViewSink"/> target when the form loads.
     /// </summary>
-    /// <param name="sender">イベント送信元オブジェクト。</param>
-    /// <param name="e">イベントデータ。</param>
+    /// <param name="sender">The event source.</param>
+    /// <param name="e">The event data.</param>
     private void OnMainFormLoad(object? sender, EventArgs e) => _listViewSink.SetTarget(LogView);
 
     /// <summary>
-    /// PCStart ボタンクリック時に照明を ON にする。
+    /// Turns the light ON when the PCStart button is clicked.
     /// </summary>
-    /// <param name="sender">イベント送信元オブジェクト。</param>
-    /// <param name="e">イベントデータ。</param>
+    /// <param name="sender">The event source.</param>
+    /// <param name="e">The event data.</param>
     private void OnPcStartClick(object? sender, EventArgs e)
     {
-        // fire-and-forget で実行し、例外はログに記録する
+        // Fire-and-forget; exceptions are logged
         Task.Run(async () =>
         {
             try
@@ -67,13 +67,13 @@ internal sealed partial class MainForm : Form
     }
 
     /// <summary>
-    /// PCStop ボタンクリック時に照明を OFF にする。
+    /// Turns the light OFF when the PCStop button is clicked.
     /// </summary>
-    /// <param name="sender">イベント送信元オブジェクト。</param>
-    /// <param name="e">イベントデータ。</param>
+    /// <param name="sender">The event source.</param>
+    /// <param name="e">The event data.</param>
     private void OnPcStopClick(object? sender, EventArgs e)
     {
-        // fire-and-forget で実行し、例外はログに記録する
+        // Fire-and-forget; exceptions are logged
         Task.Run(async () =>
         {
             try
@@ -88,17 +88,17 @@ internal sealed partial class MainForm : Form
     }
 
     /// <summary>
-    /// Exit ボタンクリック時にアプリケーションを終了する。
+    /// Exits the application when the Exit button is clicked.
     /// </summary>
-    /// <param name="sender">イベント送信元オブジェクト。</param>
-    /// <param name="e">イベントデータ。</param>
+    /// <param name="sender">The event source.</param>
+    /// <param name="e">The event data.</param>
     private void OnExitClick(object? sender, EventArgs e) => Application.Exit();
 
     /// <summary>
-    /// トレイメニューの「開く」クリック時にフォームを前面に表示する。
+    /// Brings the form to the front when the tray menu "Open" item is clicked.
     /// </summary>
-    /// <param name="sender">イベント送信元オブジェクト。</param>
-    /// <param name="e">イベントデータ。</param>
+    /// <param name="sender">The event source.</param>
+    /// <param name="e">The event data.</param>
     private void OnMenuItemOpenClick(object? sender, EventArgs e)
     {
         Show();
@@ -107,10 +107,10 @@ internal sealed partial class MainForm : Form
     }
 
     /// <summary>
-    /// タスクトレイアイコンのダブルクリック時にフォームを前面に表示する。
+    /// Brings the form to the front when the tray icon is double-clicked.
     /// </summary>
-    /// <param name="sender">イベント送信元オブジェクト。</param>
-    /// <param name="e">マウスイベントデータ。</param>
+    /// <param name="sender">The event source.</param>
+    /// <param name="e">The mouse event data.</param>
     private void OnNotifyIconMouseDoubleClick(object? sender, MouseEventArgs e)
     {
         Show();
@@ -119,10 +119,10 @@ internal sealed partial class MainForm : Form
     }
 
     /// <summary>
-    /// フォームのサイズ変更時に最小化されたらタスクトレイに格納する。
+    /// Hides the form to the tray when it is minimized.
     /// </summary>
-    /// <param name="sender">イベント送信元オブジェクト。</param>
-    /// <param name="e">イベントデータ。</param>
+    /// <param name="sender">The event source.</param>
+    /// <param name="e">The event data.</param>
     private void OnMainFormResize(object? sender, EventArgs e)
     {
         if (WindowState == FormWindowState.Minimized)
@@ -130,13 +130,13 @@ internal sealed partial class MainForm : Form
     }
 
     /// <summary>
-    /// 照明の ON 操作中にエラーが発生した場合のログメッセージを出力する。
+    /// Logs an error that occurred while turning the light ON.
     /// </summary>
     [LoggerMessage(Level = LogLevel.Error, Message = "照明の ON 操作中にエラーが発生しました。")]
     private static partial void LogPcStartError(ILogger<MainForm> logger, Exception exception);
 
     /// <summary>
-    /// 照明の OFF 操作中にエラーが発生した場合のログメッセージを出力する。
+    /// Logs an error that occurred while turning the light OFF.
     /// </summary>
     [LoggerMessage(Level = LogLevel.Error, Message = "照明の OFF 操作中にエラーが発生しました。")]
     private static partial void LogPcStopError(ILogger<MainForm> logger, Exception exception);

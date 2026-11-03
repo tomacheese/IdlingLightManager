@@ -3,23 +3,23 @@ using System.Diagnostics.CodeAnalysis;
 namespace IdlingLightManager.Models;
 
 /// <summary>
-/// アイドル検知に関する設定オプション。
+/// Options for idle detection.
 /// </summary>
 [SuppressMessage("Microsoft.Performance", "CA1812:AvoidUninstantiatedInternalClasses", Justification = "Instantiated by configuration binding.")]
 internal sealed class IdleDetectionOptions
 {
-    /// <summary>アイドル判定の閾値（秒）。この時間を超えたら照明を OFF にする。</summary>
+    /// <summary>Idle threshold in seconds. The light is turned OFF once idle time reaches it.</summary>
     public int ThresholdSeconds { get; init; } = 300;
 
-    /// <summary>高頻度チェック間隔（秒）。操作復帰の応答性を高めるために使用する。</summary>
+    /// <summary>Fast check interval in seconds. Keeps the response to resumed activity quick.</summary>
     public int CheckIntervalSeconds { get; init; } = 5;
 
-    /// <summary>低頻度チェック間隔（秒）。アイドル超過を判定する際に使用する。</summary>
+    /// <summary>Slow check interval in seconds. Used to detect that the idle threshold was exceeded.</summary>
     public int SlowCheckIntervalSeconds { get; init; } = 30;
 
-    /// <summary>アイドル中の定期再送間隔（分）。照明が意図せず ON になった場合の保険。</summary>
+    /// <summary>Interval in minutes for re-sending OFF while idle, as insurance against the light being turned ON unintentionally.</summary>
     public int PeriodicResendIntervalMinutes { get; init; } = 10;
 
-    /// <summary>照明 OFF 直後に ON を抑制するクールダウン期間（秒）。ワイヤレスデバイスの再接続などによる誤検知を防ぐ。</summary>
+    /// <summary>Cooldown in seconds after turning the light OFF during which ON is suppressed, to avoid false detections such as wireless device reconnects.</summary>
     public int CooldownSeconds { get; init; } = 60;
 }

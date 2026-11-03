@@ -5,17 +5,17 @@ using Serilog.Events;
 namespace IdlingLightManager.UI.Sinks;
 
 /// <summary>
-/// Serilog のログイベントを ListView に表示するカスタムシンク。
+/// Custom Serilog sink that displays log events in a ListView.
 /// </summary>
 internal sealed class ListViewSink : ILogEventSink
 {
-    /// <summary>ログ出力先の ListView。未設定の場合は <c>null</c>。</summary>
+    /// <summary>Target ListView, or <c>null</c> if not set yet.</summary>
     private ListView? _target;
 
     /// <summary>
-    /// ログ出力先の ListView を設定する（DI 循環依存を回避するため後から注入する）。
+    /// Sets the target ListView. Injected after construction to avoid a circular DI dependency.
     /// </summary>
-    /// <param name="listView">ログを表示する ListView コントロール。</param>
+    /// <param name="listView">The ListView control that displays the log.</param>
     public void SetTarget(ListView listView) => _target = listView;
 
     /// <inheritdoc />
@@ -27,7 +27,7 @@ internal sealed class ListViewSink : ILogEventSink
 
         try
         {
-            // UI スレッド以外から呼ばれた場合は BeginInvoke でマーシャリングする
+            // Marshal to the UI thread with BeginInvoke when called from another thread
             if (_target!.InvokeRequired)
                 _target.BeginInvoke(() => AddItem(logEvent));
             else
@@ -35,26 +35,26 @@ internal sealed class ListViewSink : ILogEventSink
         }
         catch (ObjectDisposedException)
         {
-            // フォーム終了中などで ListView が破棄済みの場合は何もしない
+            // The ListView may already be disposed (e.g. during form shutdown)
         }
         catch (InvalidOperationException)
         {
-            // ハンドル未作成/破棄済みへのアクセス競合時は何もしない
+            // Ignore races where the handle is not created yet or already disposed
         }
     }
 
     /// <summary>
-    /// ListView が UI 更新可能な状態かを判定する。
+    /// Determines whether the ListView can be updated.
     /// </summary>
-    /// <param name="target">判定対象の ListView。</param>
-    /// <returns>使用可能な場合は <c>true</c>。</returns>
+    /// <param name="target">The ListView to check.</param>
+    /// <returns><c>true</c> if the ListView is usable.</returns>
     private static bool IsUsableTarget(ListView? target) =>
         target is not null && !target.IsDisposed && target.IsHandleCreated;
 
     /// <summary>
-    /// ListView にログエントリを追加し、件数が上限を超えた場合は古い行を削除する。
+    /// Adds a log entry to the ListView and removes the oldest rows when the row cap is exceeded.
     /// </summary>
-    /// <param name="logEvent">追加するログイベント。</param>
+    /// <param name="logEvent">The log event to add.</param>
     private void AddItem(LogEvent logEvent)
     {
         if (!IsUsableTarget(_target)) return;
@@ -65,7 +65,6 @@ internal sealed class ListViewSink : ILogEventSink
             item.SubItems.Add(logEvent.RenderMessage(CultureInfo.InvariantCulture));
             _target!.Items.Add(item);
 
-            // 最大 200 件を超えたら古い行を削除する
             while (_target.Items.Count > 200)
                 _target.Items.RemoveAt(0);
 
@@ -73,11 +72,11 @@ internal sealed class ListViewSink : ILogEventSink
         }
         catch (ObjectDisposedException)
         {
-            // フォーム終了中などで ListView が破棄済みの場合は何もしない
+            // The ListView may already be disposed (e.g. during form shutdown)
         }
         catch (InvalidOperationException)
         {
-            // ハンドル未作成/破棄済みへのアクセス競合時は何もしない
+            // Ignore races where the handle is not created yet or already disposed
         }
     }
 }
