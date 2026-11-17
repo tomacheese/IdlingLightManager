@@ -132,9 +132,11 @@ internal sealed partial class IdleDetectionService(
                         else
                         {
                             LogActivityDetectedFast(_logger, idleTime);
-                            await _lightControl.SetLightStateAsync(true, ct).ConfigureAwait(false);
-                            _isLightOn = true;
-                            _lightOffAt = null;
+                            if (await _lightControl.SetLightStateAsync(true, ct).ConfigureAwait(false))
+                            {
+                                _isLightOn = true;
+                                _lightOffAt = null;
+                            }
                         }
                     }
                 }
@@ -186,9 +188,11 @@ internal sealed partial class IdleDetectionService(
                         else
                         {
                             LogActivityDetectedSlow(_logger, idleTime);
-                            await _lightControl.SetLightStateAsync(true, ct).ConfigureAwait(false);
-                            _isLightOn = true;
-                            _lightOffAt = null;
+                            if (await _lightControl.SetLightStateAsync(true, ct).ConfigureAwait(false))
+                            {
+                                _isLightOn = true;
+                                _lightOffAt = null;
+                            }
                         }
                     }
                 }
@@ -354,16 +358,18 @@ internal sealed partial class IdleDetectionService(
     }
 
     /// <summary>
-    /// Turns the light OFF and updates the state and the cooldown start.
+    /// Turns the light OFF and, only if the API call succeeded, updates the state and the cooldown start.
     /// Call only while holding <see cref="_stateLock"/>.
     /// </summary>
     /// <param name="ct">The cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     private async Task TurnOffLightAsync(CancellationToken ct)
     {
-        await _lightControl.SetLightStateAsync(false, ct).ConfigureAwait(false);
-        _isLightOn = false;
-        _lightOffAt = DateTime.UtcNow;
+        if (await _lightControl.SetLightStateAsync(false, ct).ConfigureAwait(false))
+        {
+            _isLightOn = false;
+            _lightOffAt = DateTime.UtcNow;
+        }
     }
 
     /// <summary>

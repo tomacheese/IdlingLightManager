@@ -4,6 +4,7 @@ using System.Text.Json;
 using IdlingLightManager.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Polly;
 
 namespace IdlingLightManager.Services;
 
@@ -30,8 +31,8 @@ internal sealed partial class LightControlService(
     /// </summary>
     /// <param name="state"><c>true</c> to turn ON, <c>false</c> to turn OFF.</param>
     /// <param name="ct">The cancellation token.</param>
-    /// <returns>A task representing the asynchronous operation.</returns>
-    public async Task SetLightStateAsync(bool state, CancellationToken ct = default)
+    /// <returns><c>true</c> if the API answered with a 2xx status; <c>false</c> if the request failed or returned a non-2xx status.</returns>
+    public async Task<bool> SetLightStateAsync(bool state, CancellationToken ct = default)
     {
         var deviceId = _opts.Value.DeviceId;
 
@@ -47,19 +48,31 @@ internal sealed partial class LightControlService(
             // Log the response status code and body
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             if (response.IsSuccessStatusCode)
+            {
                 LogLightStateSent(_logger, (int)response.StatusCode, body);
-            else
-                LogHttpResponseError(_logger, (int)response.StatusCode, body);
+                return true;
+            }
+
+            LogHttpResponseError(_logger, (int)response.StatusCode, body);
+            return false;
         }
         catch (HttpRequestException ex)
         {
             // HTTP errors are logged but not rethrown, so a transient device failure does not crash the tray app
             LogHttpError(_logger, ex, deviceId, state);
+            return false;
         }
         catch (UriFormatException ex)
         {
             // An invalid DeviceId URI is logged but not rethrown
             LogUriFormatError(_logger, ex, deviceId);
+            return false;
+        }
+        catch (ExecutionRejectedException ex)
+        {
+            // Timeouts and other resilience-pipeline rejections must not escape, or the monitoring loops stop
+            LogResilienceRejected(_logger, ex, deviceId, state);
+            return false;
         }
     }
 
@@ -78,6 +91,10 @@ internal sealed partial class LightControlService(
     /// <summary>Logs an HTTP error that occurred while sending the light state.</summary>
     [LoggerMessage(Level = LogLevel.Error, Message = "照明状態の送信中に HTTP エラーが発生しました: DeviceId={DeviceId}, State={State}")]
     private static partial void LogHttpError(ILogger<LightControlService> logger, Exception exception, string deviceId, bool state);
+
+    /// <summary>Logs a request rejected by the resilience pipeline (for example a timeout) while sending the light state.</summary>
+    [LoggerMessage(Level = LogLevel.Error, Message = "照明状態の送信がタイムアウトまたは回復性パイプラインにより拒否されました: DeviceId={DeviceId}, State={State}")]
+    private static partial void LogResilienceRejected(ILogger<LightControlService> logger, Exception exception, string deviceId, bool state);
 
     /// <summary>Logs an invalid DeviceId URI format.</summary>
     [LoggerMessage(Level = LogLevel.Error, Message = "DeviceId の URI 形式が不正です: DeviceId={DeviceId}")]
