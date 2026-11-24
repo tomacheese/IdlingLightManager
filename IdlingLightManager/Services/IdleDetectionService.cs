@@ -11,6 +11,9 @@ namespace IdlingLightManager.Services;
 /// <summary>
 /// Background service that monitors mouse/keyboard idle time and controls the light according to the threshold.
 /// </summary>
+/// <param name="lightControl">The service that controls the light.</param>
+/// <param name="opts">The idle detection options.</param>
+/// <param name="logger">The logger.</param>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Performance", "CA1812:AvoidUninstantiatedInternalClasses", Justification = "Instantiated by dependency injection.")]
 internal sealed partial class IdleDetectionService(
     LightControlService lightControl,
@@ -83,16 +86,16 @@ internal sealed partial class IdleDetectionService(
     }
 
     /// <inheritdoc />
-    public override async Task StopAsync(CancellationToken ct)
+    public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        await _stateLock.WaitAsync(ct).ConfigureAwait(false);
+        await _stateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             // Turn the light OFF on service stop if it is ON
             if (_isLightOn)
             {
                 LogStoppingService(_logger);
-                await TurnOffLightAsync(ct).ConfigureAwait(false);
+                await TurnOffLightAsync(cancellationToken).ConfigureAwait(false);
             }
         }
         finally
@@ -100,7 +103,7 @@ internal sealed partial class IdleDetectionService(
             _stateLock.Release();
         }
 
-        await base.StopAsync(ct).ConfigureAwait(false);
+        await base.StopAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

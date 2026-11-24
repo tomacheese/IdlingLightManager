@@ -11,6 +11,9 @@ namespace IdlingLightManager.Services;
 /// <summary>
 /// Service that turns the light ON/OFF through the IoT API.
 /// </summary>
+/// <param name="http">The HTTP client used to send light control requests.</param>
+/// <param name="opts">The light control options.</param>
+/// <param name="logger">The logger.</param>
 [SuppressMessage("Microsoft.Performance", "CA1812:AvoidUninstantiatedInternalClasses", Justification = "Instantiated by dependency injection.")]
 internal sealed partial class LightControlService(
     HttpClient http,
